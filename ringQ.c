@@ -2,10 +2,11 @@
 
 
 
-struct  ramq_t *ramqNew(void *baseAddr, uint32_t len)
+
+struct  ringq_t *ringqNew(void *baseAddr, uint32_t len)
 {
 	// SerialPrintln("Allocating Space");
-	struct ramq_t *me = malloc(sizeof(struct ramq_t));
+	struct ringq_t *me = malloc(sizeof(struct ringq_t));
 	// SerialPrintln("Allocation done");
 	if(me != NULL)
 	{
@@ -13,21 +14,22 @@ struct  ramq_t *ramqNew(void *baseAddr, uint32_t len)
 		me -> _len = len;
 		me -> _endAddr = (uint8_t*)baseAddr + len;
 
+		/********Serial only for arduino ***********/
 		// SerialPrint("[RingQ] Starting address: ");
 		// SerialPrintlnU32(me -> _baseAddr);
 		// SerialPrint("[RingQ] Ending address: ");
 		// SerialPrintlnU32(me -> _endAddr);
 
-		ramqReset(me);
+		ringqReset(me);
 	}
 	return me;
 }
 
-bool  ramqPush(struct ramq_t *me, void *dataPtr, uint16_t len)
+bool  ringqPush(struct ringq_t *me, void *dataPtr, uint16_t len)
 {
 	if(me -> _isLock == false)
 	{
-		len += sizeof( struct qObj_t);
+		len += sizeof(struct qObj_t);
 		uint8_t *nextHead;
 
 		
@@ -73,10 +75,8 @@ bool  ramqPush(struct ramq_t *me, void *dataPtr, uint16_t len)
 				{
 					memcpy(&(me -> _tail), me -> _tail.ptr, sizeof(struct qObj_t));
 					me -> _leadingHead = true;	
-				}
-				
-			}
-			
+				}				
+			}			
 		}
 
 		me -> _head.ptr = me -> _head.nextPtr;
@@ -115,7 +115,7 @@ bool  ramqPush(struct ramq_t *me, void *dataPtr, uint16_t len)
 		// 	memcpy(&(me -> _tail) , &(me -> _head), sizeof(struct qObj_t));
 		// }
 
-		me -> _qState  = RUNNING;
+		me -> _qState  = RINGQ_RUNNING;
 		return true;
 	}else
 	{
@@ -125,10 +125,46 @@ bool  ramqPush(struct ramq_t *me, void *dataPtr, uint16_t len)
 	
 }
 
-
-struct qObj_t *ramqPop(struct ramq_t *me)
+bool ringqPushMid(struct ringq_t *me, void *dataPtr, uint8_t mgsId, uint16_t len)
 {
-	if(me -> _qState == RUNNING)
+	if(ringqPush(me,dataPtr,len))
+	{
+		me -> _head.mgsId = mgsId;
+		me -> _head.mgsState = DATA_RECEIVED;
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+	
+}
+
+struct qObj_t *ringqNextTail(struct ringq_t *me)
+{
+	if(me -> _qState == RINGQ_RUNNING)
+	{
+		struct qObj_t currentTail;
+		memcpy((uint8_t *)&currentTail, me -> _tail.nextPtr, sizeof(struct qObj_t));
+		return (struct qObj_t *)(currentTail.ptr);
+	}
+	// else if(me -> _qState == NO_DATA)
+	// {
+	// 	// SerialPrintln("[RingQ_POP] NO_DATA available to read.");
+	// }
+	// else if(me -> _qState == RESET)
+	// {
+	// 	// SerialPrintln("[RingQ_POP] RESET conditions.");
+	// }
+
+	return 0;
+}
+
+
+
+struct qObj_t *ringqPop(struct ringq_t *me)
+{
+	if(me -> _qState == RINGQ_RUNNING)
 	{
 
 		memcpy(&(me -> _tail), me -> _tail.nextPtr, sizeof(struct qObj_t));	
@@ -160,7 +196,7 @@ struct qObj_t *ramqPop(struct ramq_t *me)
 			
 		}else{
 			// me -> _isLock = false;
-			me -> _qState = NO_DATA;
+			me -> _qState = RINGQ_NO_DATA;
 			me -> _leadingHead = true;
 		}
 		me -> _isLock = false;
@@ -176,11 +212,11 @@ struct qObj_t *ramqPop(struct ramq_t *me)
 
 		return currentTailObj;
 	}
-	else if(me -> _qState == NO_DATA)
+	else if(me -> _qState == RINGQ_NO_DATA)
 	{
 		// SerialPrintln("[RingQ_POP] NO_DATA available to read.");
 	}
-	else if(me -> _qState == RESET)
+	else if(me -> _qState == RINGQ_RESET)
 	{
 		// SerialPrintln("[RingQ_POP] RESET conditions.");
 	}
@@ -188,7 +224,7 @@ struct qObj_t *ramqPop(struct ramq_t *me)
 	return 0;
 }
 
-uint32_t ramqNextPacketLen(struct ramq_t *ramq)
+uint32_t ringqNextPacketLen(struct ringq_t *ramq)
 {
 	struct qObj_t *currentTailObj = (struct qObj_t *)(ramq -> _tail.nextPtr);
 	return currentTailObj->len;
@@ -196,7 +232,7 @@ uint32_t ramqNextPacketLen(struct ramq_t *ramq)
 
 
 
-void ramqReset(struct ramq_t *me)
+void ringqReset(struct ringq_t *me)
 {
 	memset(me -> _baseAddr, '\0',me -> _len);
 	me -> _head.ptr = me -> _baseAddr;
@@ -210,11 +246,14 @@ void ramqReset(struct ramq_t *me)
 
 	me -> _isLock = false;
 	me -> _leadingHead = true;
-	me -> _qState = RESET;
+	me -> _qState = RINGQ_RESET;
 }
 
-bool ramqIsLocked(struct ramq_t *ramq)
+bool ringqIsLocked(struct ringq_t *ramq)
 {
 	return ramq ->_isLock;
 }
+
+
+
 
